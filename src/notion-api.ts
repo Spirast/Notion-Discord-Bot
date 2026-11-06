@@ -8,6 +8,8 @@ export interface Task {
   title: string;
   dueDate: Date | null;
   url: string;
+  completed: boolean;
+  types: string[];
 }
 
 let notionClient: Client | null = null;
@@ -70,7 +72,29 @@ function isCompleted(page: PageObjectResponse): boolean {
   return false;
 }
 
-export async function fetchTasks(): Promise<Task[]> {
+function getTypes(page: PageObjectResponse): string[] {
+  const entries = Object.entries(page.properties);
+
+  const typeEntry =
+    entries.find(
+      ([name, prop]) =>
+        (prop.type === "multi_select" || prop.type === "select") &&
+        name.toLowerCase().includes("type"),
+    ) ?? entries.find(([, prop]) => prop.type === "multi_select");
+
+  if (!typeEntry) return [];
+
+  const [, typeProp] = typeEntry;
+  if (typeProp.type === "multi_select") {
+    return typeProp.multi_select.map((option) => option.name);
+  }
+  if (typeProp.type === "select" && typeProp.select?.name) {
+    return [typeProp.select.name];
+  }
+  return [];
+}
+
+async function fetchAllTasks(): Promise<Task[]> {
   const databaseId = process.env.NOTION_DATABASE_ID;
   if (!databaseId) {
     throw new Error("NOTION_DATABASE_ID is not set");
@@ -84,23 +108,61 @@ export async function fetchTasks(): Promise<Task[]> {
   for await (const row of iterateAllDataSourceRows(notion, {
     data_source_id: dataSourceId,
   })) {
-    if (!isFullPage(row) || isCompleted(row)) continue;
-
-    const dueDate = getDueDate(row);
-    if (!dueDate) continue;
+    if (!isFullPage(row)) continue;
 
     tasks.push({
       id: row.id,
       title: getTitle(row),
-      dueDate,
+      dueDate: getDueDate(row),
       url: row.url,
+      completed: isCompleted(row),
+      types: getTypes(row),
     });
   }
 
-  // Overdue first (most overdue at top), then today, then soonest upcoming
-  tasks.sort((a, b) => (a.dueDate?.getTime() ?? 0) - (b.dueDate?.getTime() ?? 0));
-
   return tasks;
+}
+
+export async function fetchTasks(): Promise<Task[]> {
+  const tasks = await fetchAllTasks();
+
+  return tasks
+    .filter((task) => !task.completed && task.dueDate)
+    .sort((a, b) => (a.dueDate?.getTime() ?? 0) - (b.dueDate?.getTime() ?? 0));
+}
+
+export interface TaskTypeStats {
+  total: number;
+  completed: number;
+}
+
+export interface TaskStats {
+  total: number;
+  completed: number;
+  byType: Record<string, TaskTypeStats>;
+}
+
+export async function fetchTaskStats(): Promise<TaskStats> {
+  const tasks = await fetchAllTasks();
+
+  const stats: TaskStats = { total: tasks.length, completed: 0, byType: {} };
+
+  for (const task of tasks) {
+    if (task.completed) stats.completed++;
+
+    const types = task.types.length > 0 ? task.types : ["Uncategorized"];
+    for (const type of types) {
+      let typeStats = stats.byType[type];
+      if (!typeStats) {
+        typeStats = { total: 0, completed: 0 };
+        stats.byType[type] = typeStats;
+      }
+      typeStats.total++;
+      if (task.completed) typeStats.completed++;
+    }
+  }
+
+  return stats;
 }
 
 export async function fetchTopTasks(limit = 5): Promise<Task[]> {
