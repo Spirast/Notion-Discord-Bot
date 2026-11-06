@@ -10,6 +10,7 @@ export interface Task {
   url: string;
   completed: boolean;
   types: string[];
+  lastEditedById: string | null;
 }
 
 let notionClient: Client | null = null;
@@ -117,10 +118,30 @@ export async function fetchAllTasks(): Promise<Task[]> {
       url: row.url,
       completed: isCompleted(row),
       types: getTypes(row),
+      lastEditedById: row.last_edited_by?.id ?? null,
     });
   }
 
   return tasks;
+}
+
+const userNameCache = new Map<string, string | null>();
+
+export async function getNotionUserName(userId: string): Promise<string | null> {
+  if (userNameCache.has(userId)) {
+    return userNameCache.get(userId) ?? null;
+  }
+
+  try {
+    const user = await getNotionClient().users.retrieve({ user_id: userId });
+    const name = "name" in user ? (user.name ?? null) : null;
+    userNameCache.set(userId, name);
+    return name;
+  } catch (error) {
+    console.error(`Failed to resolve Notion user ${userId}:`, error);
+    userNameCache.set(userId, null);
+    return null;
+  }
 }
 
 export async function fetchTasks(): Promise<Task[]> {

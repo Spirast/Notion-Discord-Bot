@@ -39,6 +39,15 @@ function progressBar(percent: number, length = 20): string {
   return `${"█".repeat(filled)}${"░".repeat(length - filled)}`;
 }
 
+const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+
+function tasksEmbedColor(tasks: { dueDate: Date | null }[]): number {
+  const now = Date.now();
+  if (tasks.some((t) => t.dueDate && t.dueDate.getTime() < now)) return 0xed4245;
+  if (tasks.some((t) => t.dueDate && t.dueDate.getTime() - now < TWO_DAYS_MS)) return 0xfee75c;
+  return 0x5865f2;
+}
+
 export const commandHandlers: Record<
   string,
   (interaction: ChatInputCommandInteraction) => Promise<void>
@@ -54,19 +63,21 @@ export const commandHandlers: Record<
         return;
       }
 
-      const embed = new EmbedBuilder().setTitle("Top Tasks").setColor(0x5865f2).setTimestamp();
+      const embed = new EmbedBuilder()
+        .setTitle("Top Tasks")
+        .setColor(tasksEmbedColor(tasks))
+        .setTimestamp()
+        .setFooter({ text: `${tasks.length} upcoming task${tasks.length === 1 ? "" : "s"}` });
 
-      for (const task of tasks) {
+      const lines = tasks.map((task, index) => {
         const dueDate = task.dueDate
           ? `<t:${Math.floor(task.dueDate.getTime() / 1000)}:D>`
           : "No due date";
-        const overdue = task.dueDate && task.dueDate.getTime() < Date.now() ? " ⚠️ Overdue" : "";
-
-        embed.addFields({
-          name: task.title,
-          value: `Due: ${dueDate}${overdue}\n[Open in Notion](${task.url})`,
-        });
-      }
+        const overdue = task.dueDate && task.dueDate.getTime() < Date.now() ? " · **Overdue**" : "";
+        const types = task.types.length > 0 ? ` · ${task.types.join(", ")}` : "";
+        return `**${index + 1}.** [${task.title}](${task.url})\n   Due ${dueDate}${overdue}${types}`;
+      });
+      embed.setDescription(lines.join("\n"));
 
       await interaction.editReply({ embeds: [embed] });
     } catch (error) {
@@ -92,11 +103,11 @@ export const commandHandlers: Record<
       const embed = new EmbedBuilder()
         .setTitle("Task Status")
         .setDescription(
-          `${progressBar(percent)} **${percent}%** complete\n${completed}/${total} tasks done`,
+          `${progressBar(percent)} **${percent}%** complete\n${completed}/${total} tasks done · ${remaining} remaining`,
         )
         .setColor(percent === 100 ? 0x57f287 : 0x5865f2)
         .setTimestamp()
-        .addFields({ name: "Remaining", value: `${remaining} task${remaining === 1 ? "" : "s"}` });
+        .setFooter({ text: "Task completion by type" });
 
       const types = Object.entries(byType).sort((a, b) => b[1].total - a[1].total);
       for (const [type, stats] of types.slice(0, 25)) {
