@@ -51,7 +51,7 @@ Where to find these values:
 4. Make sure the database has:
    - A title property for the task name
    - A date property for the due date
-   - Optionally, a status or select property; statuses named `done`, `completed`, or `complete` are excluded
+   - Optionally, a status or select property; statuses named `done`, `completed`, or `complete` are excluded, and `/complete-task` uses the first matching completed option it finds
 
 Tasks without a due date are not shown.
 
@@ -76,6 +76,7 @@ When the bot starts, it registers slash commands and logs in to Discord. Use `/f
 | Command | Description |
 | --- | --- |
 | `/fetch-tasks` | Shows the top 5 open Notion tasks by due date, with overdue tasks marked |
+| `/complete-task` | Marks a Notion task as complete (autocomplete shows open tasks) |
 | `/status` | Shows task completion progress |
 | `/set-channel` | Sets the channel where task updates are broadcast (requires Manage Server; defaults to the channel the command is run in) |
 

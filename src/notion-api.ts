@@ -1,7 +1,22 @@
-import type { PageObjectResponse } from "@notionhq/client";
+import type { DataSourceObjectResponse, PageObjectResponse } from "@notionhq/client";
 import { Client, isFullPage, iterateAllDataSourceRows } from "@notionhq/client";
 
 const COMPLETED_STATUSES = new Set(["done", "completed", "complete"]);
+const COMPLETED_OPTION_PRIORITY = ["complete", "completed", "done"] as const;
+const COMPLETION_PROPERTY_NAME = /\b(?:status|state|complete|completed|done)\b/i;
+
+type DataSourceProperties = DataSourceObjectResponse["properties"];
+
+interface CompletionTarget {
+  propertyName: string;
+  propertyType: "status" | "select";
+  optionName: string;
+}
+
+export interface CompleteTaskResult {
+  task: Task;
+  wasCompleted: boolean;
+}
 
 export interface Task {
   id: string;
@@ -24,7 +39,16 @@ function getNotionClient(): Client {
   return notionClient;
 }
 
-async function getDataSourceId(databaseId: string): Promise<string> {
+function getDatabaseId(): string {
+  const databaseId = process.env.NOTION_DATABASE_ID;
+  if (!databaseId) {
+    throw new Error("NOTION_DATABASE_ID is not set");
+  }
+  return databaseId;
+}
+
+async function getDataSourceIds(): Promise<{ databaseId: string; dataSourceId: string }> {
+  const databaseId = getDatabaseId();
   const notion = getNotionClient();
   const database = await notion.databases.retrieve({
     database_id: databaseId,
@@ -38,7 +62,14 @@ async function getDataSourceId(databaseId: string): Promise<string> {
   if (!dataSourceId) {
     throw new Error(`Database ${databaseId} has no data sources`);
   }
-  return dataSourceId;
+  return { databaseId, dataSourceId };
+}
+
+async function getDataSourceProperties(dataSourceId: string): Promise<DataSourceProperties> {
+  const dataSource = await getNotionClient().dataSources.retrieve({
+    data_source_id: dataSourceId,
+  });
+  return dataSource.properties;
 }
 
 function getTitle(page: PageObjectResponse): string {
@@ -64,10 +95,10 @@ function getDueDate(page: PageObjectResponse): Date | null {
 function isCompleted(page: PageObjectResponse): boolean {
   for (const prop of Object.values(page.properties)) {
     if (prop.type === "status" && prop.status?.name) {
-      return COMPLETED_STATUSES.has(prop.status.name.toLowerCase());
+      if (COMPLETED_STATUSES.has(prop.status.name.toLowerCase())) return true;
     }
     if (prop.type === "select" && prop.select?.name) {
-      return COMPLETED_STATUSES.has(prop.select.name.toLowerCase());
+      if (COMPLETED_STATUSES.has(prop.select.name.toLowerCase())) return true;
     }
   }
   return false;
@@ -95,14 +126,79 @@ function getTypes(page: PageObjectResponse): string[] {
   return [];
 }
 
-export async function fetchAllTasks(): Promise<Task[]> {
-  const databaseId = process.env.NOTION_DATABASE_ID;
-  if (!databaseId) {
-    throw new Error("NOTION_DATABASE_ID is not set");
+function pageToTask(page: PageObjectResponse): Task {
+  return {
+    id: page.id,
+    title: getTitle(page),
+    dueDate: getDueDate(page),
+    url: page.url,
+    completed: isCompleted(page),
+    types: getTypes(page),
+    lastEditedById: page.last_edited_by?.id ?? null,
+  };
+}
+
+function completedOptionName(options: Array<{ name: string }>): string | null {
+  const namesByKey = new Map(
+    options.map((option) => [option.name.trim().toLowerCase(), option.name]),
+  );
+
+  for (const status of COMPLETED_OPTION_PRIORITY) {
+    const name = namesByKey.get(status);
+    if (name) return name;
   }
 
+  for (const option of options) {
+    if (COMPLETED_STATUSES.has(option.name.trim().toLowerCase())) return option.name;
+  }
+  return null;
+}
+
+function findCompletionTarget(properties: DataSourceProperties): CompletionTarget | null {
+  const entries = Object.entries(properties).sort(
+    (a, b) =>
+      Number(COMPLETION_PROPERTY_NAME.test(b[0])) - Number(COMPLETION_PROPERTY_NAME.test(a[0])),
+  );
+
+  for (const [propertyName, property] of entries) {
+    if (property.type !== "status") continue;
+    const optionName = completedOptionName(property.status.options);
+    if (optionName) return { propertyName, propertyType: "status", optionName };
+  }
+
+  for (const [propertyName, property] of entries) {
+    if (property.type !== "select") continue;
+    const optionName = completedOptionName(property.select.options);
+    if (optionName) return { propertyName, propertyType: "select", optionName };
+  }
+
+  return null;
+}
+
+function sameNotionId(a: string, b: string): boolean {
+  return a.replace(/-/g, "").toLowerCase() === b.replace(/-/g, "").toLowerCase();
+}
+
+function isConfiguredTaskPage(
+  page: PageObjectResponse,
+  databaseId: string,
+  dataSourceId: string,
+): boolean {
+  if (page.parent.type === "data_source_id") {
+    return (
+      sameNotionId(page.parent.data_source_id, dataSourceId) ||
+      sameNotionId(page.parent.database_id, databaseId)
+    );
+  }
+  if (page.parent.type === "database_id") {
+    return sameNotionId(page.parent.database_id, databaseId);
+  }
+  return false;
+}
+
+export async function fetchAllTasks(): Promise<Task[]> {
+  const { dataSourceId } = await getDataSourceIds();
   const notion = getNotionClient();
-  const dataSourceId = await getDataSourceId(databaseId);
 
   const tasks: Task[] = [];
 
@@ -110,16 +206,7 @@ export async function fetchAllTasks(): Promise<Task[]> {
     data_source_id: dataSourceId,
   })) {
     if (!isFullPage(row)) continue;
-
-    tasks.push({
-      id: row.id,
-      title: getTitle(row),
-      dueDate: getDueDate(row),
-      url: row.url,
-      completed: isCompleted(row),
-      types: getTypes(row),
-      lastEditedById: row.last_edited_by?.id ?? null,
-    });
+    tasks.push(pageToTask(row));
   }
 
   return tasks;
@@ -150,6 +237,57 @@ export async function fetchTasks(): Promise<Task[]> {
   return tasks
     .filter((task) => !task.completed && task.dueDate)
     .sort((a, b) => (a.dueDate?.getTime() ?? 0) - (b.dueDate?.getTime() ?? 0));
+}
+
+export async function fetchIncompleteTasks(): Promise<Task[]> {
+  const tasks = await fetchAllTasks();
+  return tasks.filter((task) => !task.completed).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+export async function completeTask(taskId: string): Promise<CompleteTaskResult> {
+  const notion = getNotionClient();
+  const { databaseId, dataSourceId } = await getDataSourceIds();
+
+  const pageResponse = await notion.pages.retrieve({ page_id: taskId });
+  if (!isFullPage(pageResponse)) {
+    throw new Error("Task not found");
+  }
+  if (!isConfiguredTaskPage(pageResponse, databaseId, dataSourceId)) {
+    throw new Error("Task not found in the configured Notion database");
+  }
+
+  const task = pageToTask(pageResponse);
+  if (task.completed) {
+    return { task, wasCompleted: true };
+  }
+
+  const properties = await getDataSourceProperties(dataSourceId);
+  const target = findCompletionTarget(properties);
+  if (!target) {
+    throw new Error("No status or select property with a completed option was found");
+  }
+
+  const property =
+    target.propertyType === "status"
+      ? { status: { name: target.optionName } }
+      : { select: { name: target.optionName } };
+
+  const updatedPage = await notion.pages.update({
+    page_id: task.id,
+    properties: {
+      [target.propertyName]: property,
+    },
+  });
+
+  if (isFullPage(updatedPage)) {
+    return { task: pageToTask(updatedPage), wasCompleted: false };
+  }
+
+  const refreshedPage = await notion.pages.retrieve({ page_id: task.id });
+  if (!isFullPage(refreshedPage)) {
+    throw new Error("Task update could not be verified");
+  }
+  return { task: pageToTask(refreshedPage), wasCompleted: false };
 }
 
 export interface TaskTypeStats {

@@ -2,7 +2,7 @@ import "dotenv/config";
 import { Client, GatewayIntentBits } from "discord.js";
 
 import { startTaskBroadcast } from "./broadcast";
-import { commandHandlers, RegisterCommands } from "./slashCommands";
+import { autocompleteHandlers, commandHandlers, RegisterCommands } from "./slashCommands";
 
 const client = new Client({
   intents: [
@@ -19,6 +19,15 @@ client.on("ready", () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if (interaction.isAutocomplete()) {
+    const handler =
+      autocompleteHandlers[interaction.commandName as keyof typeof autocompleteHandlers];
+    if (handler) {
+      await handler(interaction);
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const handler = commandHandlers[interaction.commandName as keyof typeof commandHandlers];

@@ -1,4 +1,5 @@
 import {
+  type AutocompleteInteraction,
   ChannelType,
   type ChatInputCommandInteraction,
   EmbedBuilder,
@@ -9,12 +10,23 @@ import {
 } from "discord.js";
 import "dotenv/config";
 import { setBroadcastChannel } from "./broadcast";
-import { fetchTaskStats, fetchTopTasks } from "./notion-api";
+import { completeTask, fetchIncompleteTasks, fetchTaskStats, fetchTopTasks } from "./notion-api";
 
 const slashCommands = [
   new SlashCommandBuilder()
     .setName("fetch-tasks")
     .setDescription("Fetch top tasks from the notion database")
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("complete-task")
+    .setDescription("Mark a Notion task as complete")
+    .addStringOption((option) =>
+      option
+        .setName("task")
+        .setDescription("Task to mark complete")
+        .setRequired(true)
+        .setAutocomplete(true),
+    )
     .toJSON(),
   new SlashCommandBuilder()
     .setName("status")
@@ -47,6 +59,39 @@ function tasksEmbedColor(tasks: { dueDate: Date | null }[]): number {
   if (tasks.some((t) => t.dueDate && t.dueDate.getTime() - now < TWO_DAYS_MS)) return 0xfee75c;
   return 0x5865f2;
 }
+
+export const autocompleteHandlers: Record<
+  string,
+  (interaction: AutocompleteInteraction) => Promise<void>
+> = {
+  "complete-task": async (interaction) => {
+    try {
+      const focused = interaction.options.getFocused(true);
+      const query = typeof focused.value === "string" ? focused.value.trim().toLowerCase() : "";
+      const compactQuery = query.replace(/-/g, "");
+      const tasks = await fetchIncompleteTasks();
+      const matches = tasks
+        .filter((task) => {
+          if (!query) return true;
+          return (
+            task.title.toLowerCase().includes(query) ||
+            task.id.toLowerCase().replace(/-/g, "").includes(compactQuery)
+          );
+        })
+        .slice(0, 25);
+
+      await interaction.respond(
+        matches.map((task) => ({
+          name: task.title.replace(/\s+/g, " ").trim().slice(0, 100) || "Untitled",
+          value: task.id,
+        })),
+      );
+    } catch (error) {
+      console.error("Error fetching task suggestions:", error);
+      await interaction.respond([]).catch(() => undefined);
+    }
+  },
+};
 
 export const commandHandlers: Record<
   string,
@@ -84,6 +129,25 @@ export const commandHandlers: Record<
       console.error("Error fetching tasks:", error);
       const message = error instanceof Error ? error.message : "Unknown error";
       await interaction.editReply(`Failed to fetch tasks: ${message}`);
+    }
+  },
+  "complete-task": async (interaction) => {
+    const taskId = interaction.options.getString("task", true);
+    await interaction.deferReply();
+
+    try {
+      const { task, wasCompleted } = await completeTask(taskId);
+      const embed = new EmbedBuilder()
+        .setTitle(wasCompleted ? "Task Already Complete" : "Task Completed")
+        .setDescription(`[${task.title}](${task.url})`)
+        .setColor(wasCompleted ? 0xfee75c : 0x57f287)
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (error) {
+      console.error("Error completing task:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      await interaction.editReply(`Failed to complete task: ${message}`);
     }
   },
   status: async (interaction) => {
