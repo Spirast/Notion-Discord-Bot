@@ -1,0 +1,26 @@
+
+{
+  "name": "notion-discord-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "lint": "biome lint ."
+  },
+
+  "devDependencies": {
+    "@biomejs/biome": "2.3.0",
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  }
+}
