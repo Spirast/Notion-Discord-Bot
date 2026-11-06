@@ -1,0 +1,28 @@
+import "dotenv/config";
+import { Client, GatewayIntentBits } from "discord.js";
+
+import { commandHandlers, RegisterCommands } from "./slashCommands";
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+client.on("ready", () => {
+  console.log(`Logged in as ${client.user?.tag}!`);
+  RegisterCommands();
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  const handler = commandHandlers[interaction.commandName as keyof typeof commandHandlers];
+  if (handler) {
+    await handler(interaction);
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);
