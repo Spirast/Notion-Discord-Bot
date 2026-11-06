@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { Client, GatewayIntentBits } from "discord.js";
 
+import { startTaskBroadcast } from "./broadcast";
 import { commandHandlers, RegisterCommands } from "./slashCommands";
 
 const client = new Client({
@@ -14,6 +15,7 @@ const client = new Client({
 client.on("ready", () => {
   console.log(`Logged in as ${client.user?.tag}!`);
   RegisterCommands();
+  startTaskBroadcast(client);
 });
 
 client.on("interactionCreate", async (interaction) => {

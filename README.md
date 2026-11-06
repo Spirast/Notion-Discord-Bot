@@ -76,6 +76,12 @@ When the bot starts, it registers slash commands and logs in to Discord. Use `/f
 | Command | Description |
 | --- | --- |
 | `/fetch-tasks` | Shows the top 5 open Notion tasks by due date, with overdue tasks marked |
+| `/status` | Shows task completion progress |
+| `/set-channel` | Sets the channel where task updates are broadcast (requires Manage Server; defaults to the channel the command is run in) |
+
+## Task update broadcasts
+
+The bot polls the Notion database every 30 seconds. When tasks are added, completed, or deleted in Notion, a "Task Updates" embed is posted to the channel configured with `/set-channel`. The configured channel is stored per server in `broadcast-channels.json`. On startup the current task list is used as the baseline, so existing tasks are not broadcast as new.
 
 ## Other scripts
 

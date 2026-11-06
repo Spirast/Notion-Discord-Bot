@@ -1,11 +1,14 @@
 import {
+  ChannelType,
   type ChatInputCommandInteraction,
   EmbedBuilder,
+  PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder,
 } from "discord.js";
 import "dotenv/config";
+import { setBroadcastChannel } from "./broadcast";
 import { fetchTaskStats, fetchTopTasks } from "./notion-api";
 
 const slashCommands = [
@@ -16,6 +19,18 @@ const slashCommands = [
   new SlashCommandBuilder()
     .setName("status")
     .setDescription("Show task completion progress")
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName("set-channel")
+    .setDescription("Set the channel where task updates are broadcast")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addChannelOption((option) =>
+      option
+        .setName("channel")
+        .setDescription("The channel to broadcast task updates to (defaults to this channel)")
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(false),
+    )
     .toJSON(),
 ];
 
@@ -98,6 +113,27 @@ export const commandHandlers: Record<
       const message = error instanceof Error ? error.message : "Unknown error";
       await interaction.editReply(`Failed to fetch task status: ${message}`);
     }
+  },
+  "set-channel": async (interaction) => {
+    if (!interaction.guildId) {
+      await interaction.reply({
+        content: "This command can only be used in a server.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const channel = interaction.options.getChannel("channel") ?? interaction.channel;
+    if (!channel || !("id" in channel)) {
+      await interaction.reply({ content: "Could not determine the channel.", ephemeral: true });
+      return;
+    }
+
+    setBroadcastChannel(interaction.guildId, channel.id);
+    await interaction.reply({
+      content: `Task updates will now be broadcast to <#${channel.id}>.`,
+      ephemeral: true,
+    });
   },
 };
 

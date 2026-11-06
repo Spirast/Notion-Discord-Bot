@@ -94,7 +94,7 @@ function getTypes(page: PageObjectResponse): string[] {
   return [];
 }
 
-async function fetchAllTasks(): Promise<Task[]> {
+export async function fetchAllTasks(): Promise<Task[]> {
   const databaseId = process.env.NOTION_DATABASE_ID;
   if (!databaseId) {
     throw new Error("NOTION_DATABASE_ID is not set");
